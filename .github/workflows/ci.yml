@@ -1,0 +1,42 @@
+name: Fetch
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "20 4 * * *"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up git user
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+      - name: Fetch
+        id: fetch
+        if: env.STEAM_WEB_API_KEY && env.STEAM_ID
+        run: curl "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=$STEAM_WEB_API_KEY&steamid=$STEAM_ID&include_played_free_games=true&include_free_sub=true&include_appinfo=true&include_extended_appinfo=true" > raw.json
+        env:
+          STEAM_WEB_API_KEY: ${{ secrets.STEAM_WEB_API_KEY }}
+          STEAM_ID: ${{ vars.STEAM_ID }}
+      - name: Format with jq
+        if: steps.fetch.outcome == 'success'
+        run: jq . raw.json > data.json && rm raw.json
+      - name: Commit and push
+        if: steps.fetch.outcome == 'success'
+        run: |
+          git add data.json
+          git stash
+          git switch data || git checkout --orphan data
+          git reset
+          rm -rf data.json
+          git restore --source="stash@{0}" data.json
+          git add data.json
+          git diff --staged --quiet || git commit -m "`date +'%Y-%m-%d'`: updated data from Steam"
+          git push origin data
